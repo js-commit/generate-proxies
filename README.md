@@ -22,6 +22,14 @@ A powerful tool that creates smaller "proxy" versions of your video files for fa
 - **Cross-platform** (Windows, macOS, Linux)
 - **Clean organization** (one `proxies` folder for everything)
 
+## 🎬 Complete Video Workflow
+
+**Step 1:** Generate fast proxies with this tool (3-5x faster than Adobe!)  
+**Step 2:** Edit your talking head videos with [**Video Haircut**](https://js-commit.github.io/video-haircut/) - an AI-powered editor that automatically removes silences, stutters, and filler words. Edit video like text for rapid YouTube content creation!  
+**Step 3:** Export to your favorite editor (Premiere Pro, Final Cut, DaVinci Resolve)
+
+*Perfect combo: Fast proxies + AI-powered editing = Professional YouTube videos in minutes, not hours.*
+
 ## 🚀 Quick Setup
 
 ### Install Required Tools (One-Time Setup)
@@ -61,20 +69,23 @@ python3 proxy_generator.py "/Users/YourName/Videos"
 
 ### Parallel Processing (The Game Changer!)
 ```bash
-# Windows - 4x faster than Adobe!
-python proxy_generator.py "C:\Project Footage" --parallel
+# Windows - Limit to 4 cores for other tasks
+python proxy_generator.py "C:\Project Footage" --max-workers 4
 
-# macOS - Use all CPU cores
-python3 proxy_generator.py "/Users/YourName/Project Footage" --parallel --max-workers 8
+# macOS - Use maximum 8 cores
+python3 proxy_generator.py "/Users/YourName/Project Footage" --max-workers 8
+
+# Disable parallel processing (single-threaded)
+python3 proxy_generator.py "/path/to/videos" --no-parallel
 ```
 
 ### Different Codecs & Quality
 ```bash
-# Fast H.264 proxies
-python3 proxy_generator.py "/path/to/videos" --codec h264 --parallel
+# Fast H.264 proxies (parallel by default)
+python3 proxy_generator.py "/path/to/videos" --codec h264
 
-# High-quality ProRes proxies
-python3 proxy_generator.py "/path/to/videos" --codec prores --scale half --parallel
+# High-quality ProRes proxies (parallel by default)
+python3 proxy_generator.py "/path/to/videos" --codec prores --scale half
 ```
 
 ## 🤖 Automation Scripts
@@ -84,7 +95,7 @@ python3 proxy_generator.py "/path/to/videos" --codec prores --scale half --paral
 @echo off
 echo Video Proxy Generator - Faster than Adobe Media Encoder!
 set /p folder_path="Enter video folder path: "
-python proxy_generator.py "%folder_path%" --codec h264 --parallel --scale quarter
+python proxy_generator.py "%folder_path%" --codec h264 --scale quarter
 echo Processing complete! Check the 'proxies' folder.
 pause
 ```
@@ -96,7 +107,7 @@ if "%~1"=="" (
     echo Drag a video folder onto this file!
     pause & exit
 )
-python proxy_generator.py "%~1" --parallel --codec h264
+python proxy_generator.py "%~1" --codec h264
 pause
 ```
 
@@ -105,7 +116,7 @@ pause
 #!/bin/bash
 echo "Video Proxy Generator - Faster than Adobe!"
 read -p "Enter video folder path: " folder_path
-python3 proxy_generator.py "$folder_path" --codec h264 --parallel --scale quarter
+python3 proxy_generator.py "$folder_path" --codec h264 --scale quarter
 echo "Processing complete! Check the 'proxies' folder."
 ```
 
@@ -117,8 +128,8 @@ echo "Processing complete! Check the 'proxies' folder."
 |--------|---------|-------------|
 | `--scale` | `quarter`, `half` | Video size reduction (default: quarter) |
 | `--codec` | `prores`, `h264`, `dnxhr` | Output codec (default: prores) |
-| `--parallel` | (flag) | **USE THIS!** Enable multi-core processing |
-| `--max-workers` | number | Limit concurrent processes (auto-detected) |
+| `--no-parallel` | (flag) | Disable parallel processing (parallel is **enabled by default**) |
+| `--max-workers` | number | Limit concurrent processes (auto-detected by default) |
 | `--shutdown` | (flag) | Shutdown computer when finished |
 
 ## 📂 Clean File Organization
@@ -166,17 +177,18 @@ Options:
 ## 📊 Performance Comparison
 
 **Adobe Media Encoder:** 100 files = 100x processing time (one by one)
-**This Tool:** 100 files = 12.5x processing time (8 cores parallel)
+**This Tool:** 100 files = 12.5x processing time (8 cores parallel **by default**)
 
-**Result: 8x faster processing!**
+**Result: 8x faster processing out of the box!**
 
 ## 💡 Best Practices
 
-- **Always use `--parallel`** for maximum speed
+- **Parallel processing is enabled by default** for maximum speed
 - **Premiere Pro/Final Cut**: Use `--codec prores`
 - **Avid**: Use `--codec dnxhr`
 - **General use**: Use `--codec h264` (smallest files)
-- **Large projects**: Use `--max-workers 6` or `8`
+- **Large projects**: Use `--max-workers 6` or `8` to fine-tune performance
+- **Single-threaded mode**: Add `--no-parallel` only if needed
 
 ## 🔧 Quick Troubleshooting
 
@@ -188,14 +200,17 @@ Options:
 ## 📄 Quick Commands
 
 ```bash
-# The Adobe Killer - Fast H.264 with all cores
-python3 proxy_generator.py "/path/to/videos" --codec h264 --parallel
+# The Adobe Killer - Fast H.264 (parallel by default)
+python3 proxy_generator.py "/path/to/videos" --codec h264
 
 # High Quality ProRes with 8 cores  
-python3 proxy_generator.py "/path/to/videos" --codec prores --parallel --max-workers 8
+python3 proxy_generator.py "/path/to/videos" --codec prores --max-workers 8
 
-# Overnight processing with auto-shutdown
-python3 proxy_generator.py "/path/to/videos" --parallel --shutdown
+# Overnight processing with auto-shutdown (parallel by default)
+python3 proxy_generator.py "/path/to/videos" --shutdown
+
+# Single-threaded mode (if needed)
+python3 proxy_generator.py "/path/to/videos" --no-parallel
 ```
 
-**Stop wasting time with Adobe Media Encoder - go parallel, go fast!** 🚀 
+**Stop wasting time with Adobe Media Encoder - go parallel by default, go fast!** 🚀 

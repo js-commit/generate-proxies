@@ -15,7 +15,7 @@ import shutil
 from codec_configuration import CodecConfiguration
 
 class ProxyGenerator:
-    def __init__(self, source_path, scale="quarter", codec="prores", parallel=False, max_workers=None, shutdown=False):
+    def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False):
         self.source_path = Path(source_path)
         self.scale = scale
         self.parallel = parallel
@@ -847,8 +847,8 @@ def main():
                         help='Scaling factor (default: quarter)')
     parser.add_argument('--codec', choices=['prores', 'h264', 'dnxhr'],
                         default='prores', help='Output codec (default: prores)')
-    parser.add_argument('--parallel', action='store_true',
-                        help='Enable parallel processing (for directory processing only)')
+    parser.add_argument('--no-parallel', action='store_true',
+                        help='Disable parallel processing (parallel is enabled by default)')
     parser.add_argument('--max-workers', type=int,
                         help='Maximum number of concurrent processes for parallel processing')
     parser.add_argument('--shutdown', action='store_true',
@@ -872,7 +872,7 @@ def main():
         source_path,
         scale=args.scale,
         codec=args.codec,
-        parallel=args.parallel,
+        parallel=not args.no_parallel,  # Invert the no_parallel flag
         max_workers=args.max_workers,
         shutdown=args.shutdown
     )
