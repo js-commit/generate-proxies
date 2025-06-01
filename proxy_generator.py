@@ -36,6 +36,9 @@ class ProxyGenerator:
         
         # User choice tracking for duplicate proxy handling
         self.user_choice_for_duplicates = None  # None, 'yes_to_all', 'skip_all'
+        
+        # Store pre-made decisions for conflicts (for parallel mode)
+        self.conflict_decisions = {}  # {video_path: 'yes'|'skip'}
 
         # Initialize codec configuration
         self.codec_config = CodecConfiguration(codec)
@@ -161,19 +164,49 @@ class ProxyGenerator:
             return "scale=iw/2:ih/2"
         return "scale=iw/4:ih/4"  # quarter
 
-    def _is_android_footage(self, file_path):
-        """Check if the footage is from an Android device"""
+    def _is_mobile_footage(self, file_path):
+        """Check if the footage is from a mobile or consumer device (phones, action cameras, etc.)"""
         try:
             result = subprocess.run(['exiftool', '-json', file_path],
                                     capture_output=True, text=True, check=True)
             metadata = json.loads(result.stdout)[0]
-            return 'AndroidVersion' in metadata
+            
+            # Check for various mobile/consumer device indicators
+            mobile_indicators = [
+                'AndroidVersion',        # Android phones
+                'AppleModel',           # iPhones (if present)
+                'DeviceManufacturer',   # Generic device info
+                'CameraModelName',      # Check for phone camera names
+                'Make',                 # Camera manufacturer
+                'Model'                 # Camera model
+            ]
+            
+            # Common mobile device manufacturers and models
+            mobile_keywords = [
+                'android', 'iphone', 'samsung', 'pixel', 'oneplus', 'xiaomi', 'huawei',
+                'meta', 'ray-ban', 'osmo', 'pocket', 'gopro', 'insta360', 'action',
+                'phone', 'mobile', 'smartphone'
+            ]
+            
+            # Check for direct Android indicator (original logic)
+            if 'AndroidVersion' in metadata:
+                return True
+                
+            # Check other metadata fields for mobile device indicators
+            for field in mobile_indicators:
+                if field in metadata:
+                    value = str(metadata[field]).lower()
+                    for keyword in mobile_keywords:
+                        if keyword in value:
+                            return True
+            
+            return False
         except Exception:
             return False
 
-    def _is_android_folder(self, folder_path):
-        """Check if the folder contains a .is_android indicator file"""
-        indicator_file = Path(folder_path) / '.is_android'
+    def _is_mobile_folder(self, folder_path):
+        """Check if the folder contains a .is_mobile indicator file"""
+        indicator_file = Path(folder_path) / '.is_mobile'
         return indicator_file.exists()
 
     def _is_proxy_valid(self, proxy_path):
@@ -244,9 +277,9 @@ class ProxyGenerator:
 
     def _prompt_user_for_duplicate_proxy(self, video_path, existing_proxy_path, new_proxy_path):
         """Prompt user when a proxy with different extension exists"""
-        if self.parallel:
-            # In parallel mode, automatically create duplicate to avoid user input issues
-            return 'yes'
+        # Check if we have a pre-made decision (for parallel mode)
+        if str(video_path) in self.conflict_decisions:
+            return self.conflict_decisions[str(video_path)]
             
         # Check if user has already made a global choice
         if self.user_choice_for_duplicates == 'yes_to_all':
@@ -283,6 +316,77 @@ class ProxyGenerator:
             else:
                 print("Invalid choice. Please enter 'y', 's', 'ya', or 'sa'.")
 
+    def _scan_for_conflicts(self, video_files):
+        """Scan for duplicate proxy conflicts before processing starts"""
+        conflicts = []
+        
+        for video_path in video_files:
+            video_path = Path(video_path)
+            
+            # Get the parent proxies directory
+            proxies_dir = self._get_proxies_dir(video_path)
+            
+            # Determine if this is mobile/consumer footage - either by metadata or folder indicator
+            is_mobile_metadata = self._is_mobile_footage(video_path)
+            is_mobile_folder = self._is_mobile_folder(video_path.parent)
+            is_mobile = is_mobile_metadata or is_mobile_folder
+            
+            selected_codec = "h264" if is_mobile else self.codec_config.selected_codec
+            
+            if selected_codec in ['prores', 'dnxhr']:
+                output_extension = '.mov'
+            else:
+                output_extension = '.mp4'
+            
+            proxy_name = f"{video_path.stem}_proxy{output_extension}"
+            proxy_path = proxies_dir / proxy_name
+            
+            # Skip if exact proxy already exists
+            if proxy_path.exists() and self._is_proxy_valid(proxy_path):
+                continue
+                
+            # Check for existing proxy with different extension
+            existing_different_proxy = self._find_existing_proxy_with_different_extension(video_path, proxy_path)
+            if existing_different_proxy:
+                conflicts.append({
+                    'video_path': video_path,
+                    'existing_proxy': existing_different_proxy,
+                    'new_proxy': proxy_path
+                })
+        
+        return conflicts
+
+    def _resolve_conflicts_upfront(self, conflicts):
+        """Resolve all conflicts with user input before processing starts"""
+        if not conflicts:
+            return
+            
+        print(f"\n🎯 Found {len(conflicts)} proxy conflicts that need your decision:")
+        print("=" * 60)
+        
+        for i, conflict in enumerate(conflicts, 1):
+            video_path = conflict['video_path']
+            existing_proxy = conflict['existing_proxy']
+            new_proxy = conflict['new_proxy']
+            
+            print(f"\nConflict {i}/{len(conflicts)}:")
+            choice = self._prompt_user_for_duplicate_proxy(video_path, existing_proxy, new_proxy)
+            
+            # Store the decision
+            self.conflict_decisions[str(video_path)] = choice
+            
+            # If user chose "yes-all" or "skip-all", apply to remaining conflicts
+            if self.user_choice_for_duplicates == 'yes_to_all':
+                for remaining_conflict in conflicts[i:]:
+                    self.conflict_decisions[str(remaining_conflict['video_path'])] = 'yes'
+                break
+            elif self.user_choice_for_duplicates == 'skip_all':
+                for remaining_conflict in conflicts[i:]:
+                    self.conflict_decisions[str(remaining_conflict['video_path'])] = 'skip'
+                break
+        
+        print("\n✅ All conflicts resolved! Starting processing...")
+
     def _process_file(self, video_path):
         """Process a single video file"""
         video_path = Path(video_path)
@@ -302,22 +406,22 @@ class ProxyGenerator:
         proxies_dir = self._get_proxies_dir(video_path)
         self._log(f"Using parent proxies directory: {proxies_dir}")
 
-        # Determine if this is Android footage - either by metadata or folder indicator
-        is_android_metadata = self._is_android_footage(video_path)
-        is_android_folder = self._is_android_folder(video_path.parent)
-        is_android = is_android_metadata or is_android_folder
+        # Determine if this is mobile/consumer footage - either by metadata or folder indicator
+        is_mobile_metadata = self._is_mobile_footage(video_path)
+        is_mobile_folder = self._is_mobile_folder(video_path.parent)
+        is_mobile = is_mobile_metadata or is_mobile_folder
         
-        file_details["is_android_footage"] = is_android
-        file_details["android_detection_method"] = "metadata" if is_android_metadata else ("folder indicator" if is_android_folder else "none")
+        file_details["is_mobile_footage"] = is_mobile
+        file_details["mobile_detection_method"] = "metadata" if is_mobile_metadata else ("folder indicator" if is_mobile_folder else "none")
 
-        # Get codec extension based on selection (or Android override)
-        selected_codec = "h264" if is_android else self.codec_config.selected_codec
+        # Get codec extension based on selection (or mobile footage override)
+        selected_codec = "h264" if is_mobile else self.codec_config.selected_codec
         file_details["codec_decision"]["requested_codec"] = self.codec_config.selected_codec
         file_details["codec_decision"]["actual_codec"] = selected_codec
         
-        if is_android:
-            reason = "Android footage detected via "
-            reason += "metadata" if is_android_metadata else "folder indicator"
+        if is_mobile:
+            reason = "Mobile footage detected via "
+            reason += "metadata" if is_mobile_metadata else "folder indicator"
             reason += ", using H.264"
             file_details["codec_decision"]["reason"] = reason
         else:
@@ -432,7 +536,7 @@ class ProxyGenerator:
             scaling = self._get_scaling_filter()
 
             # Get hardware acceleration and codec configuration
-            config = self.codec_config.get_configuration(is_android)
+            config = self.codec_config.get_configuration(is_mobile)
             
             # Build video filter chain with format conversion if needed for CUDA
             video_filter = self.codec_config.build_video_filter(
@@ -529,6 +633,12 @@ class ProxyGenerator:
         self.stats['total_files'] = len(video_files)
         self._log(f"Found {len(video_files)} video files")
 
+        # Scan for conflicts before processing
+        conflicts = self._scan_for_conflicts(video_files)
+        
+        # Resolve conflicts upfront
+        self._resolve_conflicts_upfront(conflicts)
+
         if self.parallel:
             # Use physical CPU cores count, max 8 concurrent processes
             default_workers = min(os.cpu_count() // 2 or 1, 8)
@@ -557,6 +667,13 @@ class ProxyGenerator:
             return
 
         self.stats['total_files'] = 1
+        
+        # Scan for conflicts before processing (even for single file)
+        conflicts = self._scan_for_conflicts([self.source_path])
+        
+        # Resolve conflicts upfront
+        self._resolve_conflicts_upfront(conflicts)
+        
         self._process_file(self.source_path)
         self._print_final_stats()
 
@@ -667,7 +784,7 @@ class ProxyGenerator:
                 f.write(f"File {idx}: {file_details['filename']}\n")
                 f.write("-" * 80 + "\n")
                 f.write(f"Size: {file_details['size_mb']:.2f} MB\n")
-                f.write(f"Android Footage: {'Yes' if file_details.get('is_android_footage', False) else 'No'}\n")
+                f.write(f"Mobile Footage: {'Yes' if file_details.get('is_mobile_footage', False) else 'No'}\n")
                 f.write(f"Result: {file_details['result']}\n")
                 
                 if file_details['result'] == 'skipped':

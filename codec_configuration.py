@@ -129,10 +129,10 @@ class CodecConfiguration:
         except subprocess.CalledProcessError:
             return False
 
-    def _get_codec_config(self, is_android: bool = False) -> Dict[str, List[str]]:
+    def _get_codec_config(self, is_mobile: bool = False) -> Dict[str, List[str]]:
         """Get codec configuration based on system capabilities and requirements"""
-        # For Android, always use H.264
-        codec = 'h264' if is_android else self.selected_codec
+        # For mobile/consumer devices, always use H.264 to avoid VFR stuttering issues
+        codec = 'h264' if is_mobile else self.selected_codec
 
         # Determine acceleration profile to use
         accel_profile = self.hw_acceleration if self.hw_acceleration in self.CODEC_PROFILES[codec] else 'software'
@@ -164,9 +164,9 @@ class CodecConfiguration:
             'hw_acceleration': self.hw_acceleration
         }
 
-    def get_configuration(self, is_android: bool = False) -> Dict[str, List[str]]:
+    def get_configuration(self, is_mobile: bool = False) -> Dict[str, List[str]]:
         """Public method to get the full configuration"""
-        return self._get_codec_config(is_android)
+        return self._get_codec_config(is_mobile)
 
     def build_video_filter(self, base_filter: str, needs_format_conversion: bool = False) -> str:
         """Build the complete video filter chain including format conversion if needed"""

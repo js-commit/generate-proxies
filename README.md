@@ -18,7 +18,7 @@ A powerful tool that creates smaller "proxy" versions of your video files for fa
 - **True parallel processing** using all CPU cores (unlike Adobe)
 - **Smart duplicate detection** - no more filename chaos
 - **Hardware acceleration** (GPU when available)
-- **Android footage detection** (auto-optimizes phone videos)
+- **Mobile/consumer footage detection** (auto-optimizes phone and action camera videos)
 - **Cross-platform** (Windows, macOS, Linux)
 - **Clean organization** (one `proxies` folder for everything)
 
@@ -151,28 +151,39 @@ Project/
     └── clip002_proxy.mov
 ```
 
-## 🎯 Smart Duplicate Handling
 
-When existing proxies are found:
-```
-Proxy already exists for 'clip001.mp4':
-  Existing: clip001_proxy.mov (ProRes)
-  New:      clip001_proxy.mp4 (H.264)
-
-Options:
-  y/yes     - Create duplicate with new codec
-  s/skip    - Skip this file
-  ya/yes-all - Apply to all remaining files
-```
-
-**No more confusing `filename_1.mp4`, `filename_2.mp4` chaos!**
+**Key Benefits:**
+- **Works in parallel mode** - conflicts resolved before threads start
+- **No interruptions** - all decisions made upfront
+- **Global choices** - "yes-all" or "skip-all" applies to remaining conflicts
+- **Clean organization** - no confusing `filename_1.mp4`, `filename_2.mp4` chaos!
 
 ## 🤖 Intelligent Features
 
-- **Android Detection**: Auto-detects phone footage, uses optimal H.264 encoding
+- **Mobile/Consumer Device Detection**: Auto-detects phone footage, action cameras, and smart glasses that may stutter when converted to ProRes due to variable frame rates - automatically uses H.264 for smooth playback
 - **Hardware Acceleration**: Uses VideoToolbox (macOS), CUDA/QSV (Windows) automatically
 - **Smart Audio**: Copies compressed audio (AAC/MP3), re-encodes uncompressed (PCM)
 - **Supported Formats**: MP4, MOV, MXF, AVI, MKV
+
+### 📱 Mobile Footage Detection
+
+**Automatic Detection:** The tool automatically detects mobile device footage from:
+- Android phones, iPhones
+- Action cameras (GoPro, Insta360)
+- Smart glasses (Ray-Ban Meta)
+- Consumer cameras (Osmo Pocket)
+
+**Manual Override:** Create an empty `.is_mobile` file in any folder to force H.264 encoding for all videos:
+```bash
+# Mark folder as containing mobile footage
+touch "/path/to/phone-clips/.is_mobile"
+
+# All videos in this folder will use H.264 instead of your selected codec
+python3 proxy_generator.py "/path/to/videos" --codec prores
+# Result: Professional footage gets ProRes, phone-clips folder gets H.264
+```
+
+**Why This Matters:** Mobile devices often record with Variable Frame Rate (VFR) which causes stuttering when converted to ProRes. H.264 handles VFR much better, giving you smooth playback.
 
 ## 📊 Performance Comparison
 
