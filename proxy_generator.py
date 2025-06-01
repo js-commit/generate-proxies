@@ -420,10 +420,18 @@ class ProxyGenerator:
         file_details["codec_decision"]["actual_codec"] = selected_codec
         
         if is_mobile:
-            reason = "Mobile footage detected via "
-            reason += "metadata" if is_mobile_metadata else "folder indicator"
-            reason += ", using H.264"
+            detection_method = "metadata" if is_mobile_metadata else "folder indicator"
+            reason = f"Mobile footage detected via {detection_method}, using H.264"
             file_details["codec_decision"]["reason"] = reason
+            
+            # Log the codec override to console/log file
+            if self.codec_config.selected_codec != "h264":
+                self._log(f"📱 CODEC OVERRIDE: {video_path.name}")
+                self._log(f"   Original codec: {self.codec_config.selected_codec.upper()}")
+                self._log(f"   Override reason: Mobile footage detected via {detection_method}")
+                self._log(f"   Using codec: H.264 (prevents VFR stuttering)")
+            else:
+                self._log(f"📱 Mobile footage detected via {detection_method} (H.264 already selected)")
         else:
             file_details["codec_decision"]["reason"] = "Using user-selected codec"
 
