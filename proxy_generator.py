@@ -7,6 +7,7 @@ import time
 import platform
 import argparse
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -933,8 +934,32 @@ class ProxyGenerator:
             except (ValueError, TypeError):
                 return True, f"Unknown codec ({codec_name}) - copying (default)"
 
+def _clean_path_input(path_input):
+    """Clean path input to handle copy-paste scenarios with quotes and escaping"""
+    if not path_input:
+        return path_input
+    
+    try:
+        # Use shlex to properly handle quotes and escaping like a shell would
+        # This handles single quotes, double quotes, escaped spaces, etc.
+        parsed = shlex.split(path_input.strip())
+        # If shlex.split returns multiple parts, join them (shouldn't happen for a single path)
+        # If it returns one part, that's our cleaned path
+        return parsed[0] if len(parsed) == 1 else ' '.join(parsed)
+    except ValueError:
+        # If shlex fails (malformed quotes), fall back to basic quote stripping
+        cleaned = path_input.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ['"', "'"]:
+            cleaned = cleaned[1:-1]
+        return cleaned
+
 # The main function remains unchanged
 def main():
+    # Display application info and current settings upfront
+    print("=" * 80)
+    print("🎬 VIDEO PROXY GENERATOR")
+    print("=" * 80)
+    
     if len(sys.argv) > 1:
         # Process quoted paths while preserving other arguments
         args = sys.argv[1:]
@@ -981,16 +1006,25 @@ def main():
 
     args = parser.parse_args()
 
+    # Display current settings
+    _display_current_settings(args)
+
+    # Handle path input with improved quote stripping
     if not args.path:
-        print("Please enter the source path (directory or video file, you can use quotes if path contains spaces):")
-        user_input = input().strip()
-        args.path = user_input.strip("'")
+        args.path = _prompt_for_path()
+
+    # Additional path cleaning for copy-paste scenarios
+    args.path = _clean_path_input(args.path)
 
     # Ensure the path exists and is accessible
     source_path = Path(args.path).expanduser().resolve()
     if not source_path.exists():
-        print(f"Error: Path '{source_path}' does not exist")
+        print(f"❌ Error: Path '{source_path}' does not exist")
+        print("Please check the path and try again.")
         sys.exit(1)
+
+    print(f"✅ Source path validated: {source_path}")
+    print("=" * 80)
 
     # Create and run proxy generator
     generator = ProxyGenerator(
@@ -1002,6 +1036,38 @@ def main():
         shutdown=args.shutdown
     )
     generator.process()
+
+def _display_current_settings(args):
+    """Display current settings to the user"""
+    print("📋 CURRENT SETTINGS:")
+    print("-" * 40)
+    print(f"Scale: {args.scale}")
+    print(f"Codec: {args.codec}")
+    print(f"Parallel Processing: {'No' if args.no_parallel else 'Yes'}")
+    if not args.no_parallel and args.max_workers:
+        print(f"Max Workers: {args.max_workers}")
+    elif not args.no_parallel:
+        default_workers = min(os.cpu_count() // 2 or 1, 8)
+        print(f"Max Workers: {default_workers} (auto-detected)")
+    print(f"Auto-shutdown: {'Yes' if args.shutdown else 'No'}")
+    print()
+
+def _prompt_for_path():
+    """Prompt user for source path with helpful instructions"""
+    print("📁 SOURCE PATH REQUIRED:")
+    print("-" * 40)
+    print("Please enter the source path (directory or video file).")
+    print("💡 Tips:")
+    print("  • You can copy-paste paths directly from File Explorer/Finder")
+    print("  • Quotes around paths will be automatically handled")
+    print("  • Use ~ for home directory (e.g., ~/Videos)")
+    print()
+    
+    while True:
+        user_input = input("Enter path: ").strip()
+        if user_input:
+            return user_input
+        print("⚠️  Path cannot be empty. Please enter a valid path.")
 
 if __name__ == '__main__':
     main()
