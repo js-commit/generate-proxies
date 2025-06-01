@@ -618,7 +618,7 @@ class ProxyGenerator:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}\n"
         print(log_message, end='')
-        with open(self.log_file, 'a') as f:
+        with open(self.log_file, 'a', encoding='utf-8') as f:
             f.write(log_message)
 
     def process_directory(self):
@@ -732,7 +732,7 @@ class ProxyGenerator:
         descriptive_filename = "_".join(filename_parts) + ".txt"
         self.report_file = self.source_path.parent / descriptive_filename
         
-        with open(self.report_file, 'w') as f:
+        with open(self.report_file, 'w', encoding='utf-8') as f:
             # System Information Section
             f.write("=" * 80 + "\n")
             f.write("SYSTEM INFORMATION\n")
