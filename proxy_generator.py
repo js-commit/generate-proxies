@@ -195,7 +195,6 @@ class ProxyGenerator:
             # Check for various mobile/consumer device indicators
             mobile_indicators = [
                 'AndroidVersion',        # Android phones
-                'AppleModel',           # iPhones (if present)
                 'DeviceManufacturer',   # Generic device info
                 'CameraModelName',      # Check for phone camera names
                 'Make',                 # Camera manufacturer
@@ -204,7 +203,7 @@ class ProxyGenerator:
             
             # Common mobile device manufacturers and models
             mobile_keywords = [
-                'android', 'iphone', 'samsung', 'pixel', 'oneplus', 'xiaomi', 'huawei',
+                'android', 'samsung', 'pixel', 'oneplus', 'xiaomi', 'huawei',
                 'meta', 'ray-ban', 'osmo', 'pocket', 'gopro', 'insta360', 'action',
                 'phone', 'mobile', 'smartphone'
             ]
