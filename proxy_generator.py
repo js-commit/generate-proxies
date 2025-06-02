@@ -212,9 +212,16 @@ class ProxyGenerator:
             return False
 
     def _is_mobile_folder(self, folder_path):
-        """Check if the folder contains a .is_mobile indicator file"""
-        indicator_file = Path(folder_path) / '.is_mobile'
-        return indicator_file.exists()
+        """Check if the folder contains any file with 'is_mobile' in its name (case insensitive)"""
+        try:
+            folder = Path(folder_path)
+            for item in folder.iterdir():
+                if 'is_mobile' in item.name.lower():
+                    return True
+            return False
+        except Exception:
+            # If we can't read the directory for any reason, return False
+            return False
 
     def _is_proxy_valid(self, proxy_path):
         """Check if existing proxy is valid"""
