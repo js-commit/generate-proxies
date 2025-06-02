@@ -15,6 +15,14 @@ import shutil
 
 from codec_configuration import CodecConfiguration
 
+def format_time_human(seconds):
+    """Convert seconds to human-readable MM:SS format"""
+    if seconds is None:
+        return "N/A"
+    minutes = int(seconds // 60)
+    seconds_remainder = int(seconds % 60)
+    return f"{minutes}:{seconds_remainder:02d}"
+
 class ProxyGenerator:
     def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False, json_output=False):
         self.source_path = Path(source_path)
@@ -603,10 +611,11 @@ class ProxyGenerator:
 
                 # Log success
                 proxy_size = self._get_file_size(proxy_path)
+                human_duration = format_time_human(duration)
 
                 self._log(
                     f"Transcoded: {video_path.name}\n"
-                    f"Time: {duration:.2f} seconds\n"
+                    f"Time: {duration:.2f} seconds ({human_duration})\n"
                     f"Original size: {file_details['size_mb']:.2f}MB\n"
                     f"Proxy size: {proxy_size:.2f}MB\n"
                     f"Command: {' '.join(cmd)}\n"
@@ -791,7 +800,8 @@ class ProxyGenerator:
             f.write("=" * 80 + "\n\n")
             
             total_time = time.time() - self.stats['start_time']
-            f.write(f"Total Processing Time: {total_time:.2f} seconds\n")
+            human_time = format_time_human(total_time)
+            f.write(f"Total Processing Time: {total_time:.2f} seconds ({human_time})\n")
             f.write(f"Total Files Found: {self.stats['total_files']}\n")
             f.write(f"Files Transcoded: {self.stats['transcoded']}\n")
             f.write(f"Files Skipped: {self.stats['skipped']}\n")
@@ -813,7 +823,9 @@ class ProxyGenerator:
                     f.write(f"Skip Reason: {file_details.get('skip_reason', 'Unknown')}\n")
                 
                 if file_details['result'] == 'transcoded':
-                    f.write(f"Processing Time: {file_details['processing_time_seconds']:.2f} seconds\n")
+                    processing_time = file_details['processing_time_seconds']
+                    human_processing_time = format_time_human(processing_time)
+                    f.write(f"Processing Time: {processing_time:.2f} seconds ({human_processing_time})\n")
                     f.write(f"Proxy Size: {file_details.get('proxy_size_mb', 'N/A'):.2f} MB\n")
                     f.write(f"Compression Ratio: {file_details.get('compression_ratio', 'N/A'):.2f}x\n")
                 
@@ -861,6 +873,7 @@ class ProxyGenerator:
     def _generate_benchmark_json(self):
         """Generate JSON output for benchmarking"""
         total_time = time.time() - self.stats['start_time']
+        human_time = format_time_human(total_time)
         
         # Determine actual workers used
         if self.parallel:
@@ -870,6 +883,7 @@ class ProxyGenerator:
         
         benchmark_data = {
             "completion_time_seconds": round(total_time, 2),
+            "completion_time_human": human_time,
             "configuration": {
                 "codec": self.codec_config.selected_codec,
                 "parallel": self.parallel,
@@ -904,9 +918,10 @@ class ProxyGenerator:
     def _print_final_stats(self):
         """Print final statistics and generate detailed report"""
         total_time = time.time() - self.stats['start_time']
+        human_time = format_time_human(total_time)
         self._log(
             f"\nFinal Report:\n"
-            f"Total time: {total_time:.2f} seconds\n"
+            f"Total time: {total_time:.2f} seconds ({human_time})\n"
             f"Total files found: {self.stats['total_files']}\n"
             f"Files transcoded: {self.stats['transcoded']}\n"
             f"Files skipped: {self.stats['skipped']}\n"

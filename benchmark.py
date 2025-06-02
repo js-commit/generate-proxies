@@ -10,6 +10,14 @@ from pathlib import Path
 from datetime import datetime
 import platform
 
+def format_time_human(seconds):
+    """Convert seconds to human-readable MM:SS format"""
+    if seconds is None:
+        return "N/A"
+    minutes = int(seconds // 60)
+    seconds_remainder = int(seconds % 60)
+    return f"{minutes}:{seconds_remainder:02d}"
+
 class ProxyBenchmark:
     def __init__(self, source_path):
         self.source_path = Path(source_path)
@@ -118,7 +126,9 @@ class ProxyBenchmark:
                 }
                 
                 self.results.append(json_data)
-                print(f"   ✅ Completed in {json_data['completion_time_seconds']}s")
+                completion_time = json_data['completion_time_seconds']
+                human_time = format_time_human(completion_time)
+                print(f"   ✅ Completed in {completion_time}s ({human_time})")
                 return True
             else:
                 print(f"   ❌ No JSON output found")
@@ -175,13 +185,14 @@ class ProxyBenchmark:
             fastest = results[0]
             optimal_configs[codec] = fastest
             
-            print(f"{'Configuration':<15} {'Time (s)':<10} {'Workers':<8} {'Files':<8} {'Speedup':<8}")
-            print("-" * 50)
+            print(f"{'Configuration':<15} {'Time (s)':<10} {'Time (MM:SS)':<12} {'Workers':<8} {'Files':<8} {'Speedup':<8}")
+            print("-" * 65)
             
             baseline_time = None
             for result in results:
                 config = result['benchmark_metadata']['config_name']
                 time_taken = result['completion_time_seconds']
+                human_time = format_time_human(time_taken)
                 workers = result['configuration']['max_workers']
                 files = result['results']['transcoded']
                 
@@ -197,10 +208,11 @@ class ProxyBenchmark:
                 # Mark the fastest configuration
                 marker = " ⭐" if result == fastest else ""
                 
-                print(f"{config:<15} {time_taken:<10.1f} {workers:<8} {files:<8} {speedup:<8}{marker}")
+                print(f"{config:<15} {time_taken:<10.1f} {human_time:<12} {workers:<8} {files:<8} {speedup:<8}{marker}")
             
+            optimal_time_human = format_time_human(fastest['completion_time_seconds'])
             print(f"\n🏆 Optimal for {codec.upper()}: {fastest['benchmark_metadata']['config_name']} "
-                  f"({fastest['completion_time_seconds']:.1f}s with {fastest['configuration']['max_workers']} workers)")
+                  f"({fastest['completion_time_seconds']:.1f}s / {optimal_time_human} with {fastest['configuration']['max_workers']} workers)")
         
         return optimal_configs
 
@@ -263,7 +275,9 @@ class ProxyBenchmark:
                 'timestamp': self.timestamp,
                 'source_path': str(self.source_path),
                 'total_configurations_tested': len(self.results),
-                'benchmark_duration_minutes': round(sum(r['completion_time_seconds'] for r in self.results) / 60, 1)
+                'benchmark_duration_minutes': round(sum(r['completion_time_seconds'] for r in self.results) / 60, 1),
+                'total_benchmark_time_seconds': round(sum(r['completion_time_seconds'] for r in self.results), 1),
+                'total_benchmark_time_human': format_time_human(sum(r['completion_time_seconds'] for r in self.results))
             },
             'system_info': self.system_info,
             'optimal_configurations': {
@@ -271,6 +285,7 @@ class ProxyBenchmark:
                     'config_name': config['benchmark_metadata']['config_name'],
                     'workers': config['configuration']['max_workers'],
                     'time_seconds': config['completion_time_seconds'],
+                    'time_human': format_time_human(config['completion_time_seconds']),
                     'hardware_acceleration': config['configuration']['hardware_acceleration']
                 } for codec, config in optimal_configs.items()
             },
