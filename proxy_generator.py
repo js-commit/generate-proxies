@@ -16,12 +16,13 @@ import shutil
 from codec_configuration import CodecConfiguration
 
 class ProxyGenerator:
-    def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False):
+    def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False, json_output=False):
         self.source_path = Path(source_path)
         self.scale = scale
         self.parallel = parallel
         self.max_workers = max_workers
         self.shutdown = shutdown
+        self.json_output = json_output
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Create proxy_logs directory for logs and reports
@@ -850,6 +851,49 @@ class ProxyGenerator:
             
         return self.report_file
 
+    def _generate_benchmark_json(self):
+        """Generate JSON output for benchmarking"""
+        total_time = time.time() - self.stats['start_time']
+        
+        # Determine actual workers used
+        if self.parallel:
+            actual_workers = self.max_workers or min(os.cpu_count() // 2 or 1, 8)
+        else:
+            actual_workers = 1
+        
+        benchmark_data = {
+            "completion_time_seconds": round(total_time, 2),
+            "configuration": {
+                "codec": self.codec_config.selected_codec,
+                "parallel": self.parallel,
+                "max_workers": actual_workers,
+                "scale": self.scale,
+                "input_path": str(self.source_path),
+                "hardware_acceleration": self.codec_config.hw_acceleration or "none"
+            },
+            "system_info": {
+                "cpu": self.system_info['cpu'],
+                "os": self.system_info['os'],
+                "available_cores": os.cpu_count()
+            },
+            "results": {
+                "total_files": self.stats['total_files'],
+                "transcoded": self.stats['transcoded'],
+                "skipped": self.stats['skipped'],
+                "moved": self.stats['moved']
+            },
+            "timestamp": self.timestamp
+        }
+        
+        # Generate JSON filename
+        json_filename = f"benchmark-{self.codec_config.selected_codec}-{actual_workers}workers-{self.timestamp}.json"
+        json_path = self.proxy_logs_dir / json_filename
+        
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(benchmark_data, f, indent=2)
+        
+        return json_path, benchmark_data
+
     def _print_final_stats(self):
         """Print final statistics and generate detailed report"""
         total_time = time.time() - self.stats['start_time']
@@ -865,6 +909,11 @@ class ProxyGenerator:
         # Generate detailed report
         report_path = self._generate_detailed_report()
         self._log(f"\nDetailed report generated at: {report_path}\n")
+        
+        # Generate JSON output if requested
+        if self.json_output:
+            json_path, json_data = self._generate_benchmark_json()
+            self._log(f"Benchmark JSON generated at: {json_path}\n")
 
         if self.shutdown:
             self._shutdown_system()
@@ -1025,6 +1074,8 @@ def main():
                         help='Maximum number of concurrent processes for parallel processing')
     parser.add_argument('--shutdown', action='store_true',
                         help='Shutdown the computer when processing is complete')
+    parser.add_argument('--json-output', action='store_true',
+                        help='Generate JSON output for benchmarking')
 
     args = parser.parse_args()
 
@@ -1055,7 +1106,8 @@ def main():
         codec=args.codec,
         parallel=not args.no_parallel,  # Invert the no_parallel flag
         max_workers=args.max_workers,
-        shutdown=args.shutdown
+        shutdown=args.shutdown,
+        json_output=args.json_output
     )
     generator.process()
 
@@ -1072,6 +1124,7 @@ def _display_current_settings(args):
         default_workers = min(os.cpu_count() // 2 or 1, 8)
         print(f"Max Workers: {default_workers} (auto-detected)")
     print(f"Auto-shutdown: {'Yes' if args.shutdown else 'No'}")
+    print(f"JSON Output: {'Yes' if args.json_output else 'No'}")
     print()
 
 def _prompt_for_path():
