@@ -10,6 +10,12 @@ from pathlib import Path
 from datetime import datetime
 import platform
 
+# Fix for Windows Unicode encoding issues
+if platform.system() == "Windows":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 def format_time_human(seconds):
     """Convert seconds to human-readable MM:SS format"""
     if seconds is None:
