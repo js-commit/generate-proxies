@@ -23,8 +23,13 @@ class ProxyGenerator:
         self.max_workers = max_workers
         self.shutdown = shutdown
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file = self.source_path.parent / f"proxy-gen-logs-and-report-{self.timestamp}.txt"
-        self.report_file = None  
+        
+        # Create proxy_logs directory for logs and reports
+        self.proxy_logs_dir = self.source_path.parent / "proxy_logs"
+        self.proxy_logs_dir.mkdir(exist_ok=True)
+        
+        self.log_file = self.proxy_logs_dir / f"proxy-gen-logs-and-report-{self.timestamp}.txt"
+        self.report_file = None
         self.video_extensions = {'.mp4', '.mov', '.mxf', '.avi', '.mkv'}
         self.stats = {
             'total_files': 0,
@@ -730,7 +735,7 @@ class ProxyGenerator:
         ]
         
         descriptive_filename = "_".join(filename_parts) + ".txt"
-        self.report_file = self.source_path.parent / descriptive_filename
+        self.report_file = self.proxy_logs_dir / descriptive_filename
         
         with open(self.report_file, 'w', encoding='utf-8') as f:
             # System Information Section
@@ -939,18 +944,35 @@ def _clean_path_input(path_input):
     if not path_input:
         return path_input
     
+    # First, strip any leading/trailing whitespace
+    cleaned = path_input.strip()
+    
+    # If the input is already quoted, use shlex to handle it properly
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        try:
+            parsed = shlex.split(cleaned)
+            return parsed[0] if len(parsed) == 1 else ' '.join(parsed)
+        except ValueError:
+            # If shlex fails, manually strip quotes
+            return cleaned[1:-1] if len(cleaned) >= 2 else cleaned
+    
+    # For Windows, check if this looks like a drive path (e.g., C:\, D:\, F:\)
+    # If so, treat the entire input as a single path regardless of spaces
+    if platform.system() == "Windows":
+        # Check for Windows drive letter pattern (e.g., C:, D:, F:)
+        if len(cleaned) >= 2 and cleaned[1] == ':' and cleaned[0].isalpha():
+            # This looks like a Windows path, return as-is
+            return cleaned
+        # Also check for UNC paths (\\server\share)
+        elif cleaned.startswith('\\\\'):
+            return cleaned
+    
+    # For non-Windows or paths that don't look like drive paths, try shlex
     try:
-        # Use shlex to properly handle quotes and escaping like a shell would
-        # This handles single quotes, double quotes, escaped spaces, etc.
-        parsed = shlex.split(path_input.strip())
-        # If shlex.split returns multiple parts, join them (shouldn't happen for a single path)
-        # If it returns one part, that's our cleaned path
+        parsed = shlex.split(cleaned)
         return parsed[0] if len(parsed) == 1 else ' '.join(parsed)
     except ValueError:
-        # If shlex fails (malformed quotes), fall back to basic quote stripping
-        cleaned = path_input.strip()
-        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ['"', "'"]:
-            cleaned = cleaned[1:-1]
+        # If shlex fails, return the cleaned input as-is
         return cleaned
 
 # The main function remains unchanged
