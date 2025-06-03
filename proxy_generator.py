@@ -573,14 +573,26 @@ class ProxyGenerator:
             # Get hardware acceleration and codec configuration
             config = self.codec_config.get_configuration(is_mobile)
             
-            # Build video filter chain with format conversion if needed for CUDA
-            video_filter = self.codec_config.build_video_filter(
+            # Build video filter chain with GPU-accelerated scaling for CUDA
+            video_filter, fallback_reason = self.codec_config.build_video_filter(
                 scaling, 
-                config.get('needs_format_conversion', False)
+                config.get('needs_format_conversion', False),
+                video_path=str(video_path),
+                target_codec=selected_codec
             )
             
-            if config.get('needs_format_conversion', False):
-                self._log(f"Adding format=yuv420p filter for CUDA hardware acceleration")
+            # Log CUDA optimizations or fallback reasons
+            if fallback_reason:
+                self._log(f"⚠️  CUDA Fallback Applied: {fallback_reason}")
+                self._log(f"   - Video filter: {video_filter}")
+                self._log(f"   - This prevents scaling filter errors with HEVC 10-bit sources")
+            elif self.codec_config.hw_acceleration == 'cuda' and selected_codec in ['h264', 'hevc']:
+                self._log(f"🚀 GPU Acceleration Optimized: Using scale_cuda and hwaccel_output_format for maximum performance")
+                self._log(f"   - GPU scaling: {video_filter}")
+                self._log(f"   - Hardware acceleration: {config['hw_accel_args']}")
+                self._log(f"   - Eliminates GPU↔CPU memory transfers")
+            elif config.get('needs_format_conversion', False):
+                self._log(f"Adding format=yuv420p filter for hardware acceleration")
             
             file_details["codec_config"] = {
                 "hw_accel_args": config['hw_accel_args'],
