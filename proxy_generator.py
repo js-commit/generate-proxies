@@ -570,8 +570,28 @@ class ProxyGenerator:
 
             scaling = self._get_scaling_filter()
 
+            # Check if source is 10-bit HEVC to apply special handling
+            source_info = self.codec_config._get_source_video_info(str(video_path))
+            is_hevc_10bit = self.codec_config._is_hevc_10bit(source_info)
+            
             # Get hardware acceleration and codec configuration
-            config = self.codec_config.get_configuration(is_mobile)
+            if is_hevc_10bit and self.codec_config.hw_acceleration == 'cuda':
+                # Use special configuration for 10-bit HEVC sources
+                config = self.codec_config.get_hevc_10bit_codec_config(is_mobile)
+                self._log(f"🎬 10-bit HEVC source detected: Using special H.264 encoding with CPU scaling")
+                self._log(f"   - Source format: {source_info.get('codec_name', 'unknown')} {source_info.get('profile', 'unknown')} {source_info.get('pix_fmt', 'unknown')}")
+                self._log(f"   - Target codec: H.264 (forced for compatibility)")
+                
+                # Override the output extension to .mp4 for H.264 encoding
+                output_extension = '.mp4'
+                proxy_name = f"{video_path.stem}_proxy{output_extension}"
+                proxy_path = proxies_dir / proxy_name
+                file_details["output_extension"] = output_extension
+                file_details["codec_decision"]["hevc_10bit_override"] = True
+                file_details["codec_decision"]["reason"] += " (10-bit HEVC → H.264 conversion)"
+            else:
+                # Use normal configuration
+                config = self.codec_config.get_configuration(is_mobile)
             
             # Build video filter chain with GPU-accelerated scaling for CUDA
             video_filter, fallback_reason = self.codec_config.build_video_filter(
@@ -585,7 +605,8 @@ class ProxyGenerator:
             if fallback_reason:
                 self._log(f"⚠️  CUDA Fallback Applied: {fallback_reason}")
                 self._log(f"   - Video filter: {video_filter}")
-                self._log(f"   - This prevents scaling filter errors with HEVC 10-bit sources")
+                if is_hevc_10bit:
+                    self._log(f"   - Using H.264 encoding and CPU scaling for 10-bit HEVC compatibility")
             elif self.codec_config.hw_acceleration == 'cuda' and selected_codec in ['h264', 'hevc']:
                 self._log(f"🚀 GPU Acceleration Optimized: Using scale_cuda and hwaccel_output_format for maximum performance")
                 self._log(f"   - GPU scaling: {video_filter}")

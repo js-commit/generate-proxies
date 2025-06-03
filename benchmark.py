@@ -25,18 +25,28 @@ def format_time_human(seconds):
     return f"{minutes}:{seconds_remainder:02d}"
 
 class ProxyBenchmark:
-    def __init__(self, source_path):
+    def __init__(self, source_path, codecs=None, worker_names=None):
         self.source_path = Path(source_path)
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        # Default configurations
+        if codecs is None:
+            codecs = ['h264', 'prores']
+        if worker_names is None:
+            worker_names = ['single', '2x', '6x', '8x']
+        
         # Benchmark configurations
-        self.codecs = ['h264', 'prores']
-        self.worker_configs = [
-            {'parallel': False, 'workers': 1, 'name': 'single'},
-            {'parallel': True, 'workers': 2, 'name': '2x'},
-            {'parallel': True, 'workers': 6, 'name': '6x'},
-            {'parallel': True, 'workers': 8, 'name': '8x'}
-        ]
+        self.codecs = codecs
+        
+        # Map worker names to configurations
+        all_worker_configs = {
+            'single': {'parallel': False, 'workers': 1, 'name': 'single'},
+            '2x': {'parallel': True, 'workers': 2, 'name': '2x'},
+            '6x': {'parallel': True, 'workers': 6, 'name': '6x'},
+            '8x': {'parallel': True, 'workers': 8, 'name': '8x'}
+        }
+        
+        self.worker_configs = [all_worker_configs[name] for name in worker_names if name in all_worker_configs]
         
         # Results storage
         self.results = []
@@ -384,6 +394,10 @@ class ProxyBenchmark:
 def main():
     parser = argparse.ArgumentParser(description='Benchmark video proxy generation performance')
     parser.add_argument('path', help='Source path (directory or video file)')
+    parser.add_argument('--codec', choices=['h264', 'prores'], nargs='+', 
+                       help='Codec(s) to test (default: both h264 and prores)')
+    parser.add_argument('--workers', choices=['single', '2x', '6x', '8x'], nargs='+',
+                       help='Worker configuration(s) to test (default: all)')
     
     args = parser.parse_args()
     
@@ -393,8 +407,8 @@ def main():
         print(f"❌ Error: Path '{source_path}' does not exist")
         sys.exit(1)
     
-    # Run benchmark
-    benchmark = ProxyBenchmark(source_path)
+    # Run benchmark with custom configurations
+    benchmark = ProxyBenchmark(source_path, codecs=args.codec, worker_names=args.workers)
     benchmark.run_benchmark()
 
 if __name__ == '__main__':

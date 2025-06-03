@@ -240,21 +240,22 @@ class CodecConfiguration:
         if video_path:
             source_info = self._get_source_video_info(video_path)
         
-        # Check for problematic HEVC 10-bit + ProRes combination
+        # Check for problematic HEVC 10-bit combination
         is_hevc_10bit = self._is_hevc_10bit(source_info)
-        is_prores_target = target_codec in ['prores', 'dnxhr']
         
         # Apply CUDA optimization fallback logic
         use_cpu_fallback = False
         fallback_reason = ""
         
-        if (self.hw_acceleration == 'cuda' and is_hevc_10bit and is_prores_target):
+        # For HEVC 10-bit sources, always use CPU scaling with format conversion
+        # This works regardless of target codec
+        if (self.hw_acceleration == 'cuda' and is_hevc_10bit):
             use_cpu_fallback = True
-            fallback_reason = f"HEVC 10-bit source → {target_codec.upper()} target: Using CPU scaling to avoid format compatibility issues"
+            fallback_reason = f"HEVC 10-bit source: Using CPU scaling with format conversion to prevent compatibility issues"
         
         # Apply the appropriate filter chain
         if use_cpu_fallback:
-            # Use CPU scaling with format conversion for problematic combinations
+            # Use CPU scaling with format conversion for 10-bit HEVC sources
             filters = [base_filter, 'format=yuv420p']
         else:
             # Use GPU scaling for CUDA when compatible
@@ -289,3 +290,42 @@ class CodecConfiguration:
             }
         
         return system_info
+
+    def get_hevc_10bit_codec_config(self, is_mobile: bool = False) -> Dict[str, List[str]]:
+        """Get special codec configuration for HEVC 10-bit sources that uses H.264 encoding
+        
+        This configuration is designed to work around compatibility issues with HEVC 10-bit sources
+        by using H.264 encoding with CPU-based processing.
+        """
+        # Force H.264 codec for 10-bit HEVC sources
+        codec = 'h264'
+        
+        # Determine acceleration profile to use
+        accel_profile = self.hw_acceleration if self.hw_acceleration in self.CODEC_PROFILES[codec] else 'software'
+        profile = self.CODEC_PROFILES[codec][accel_profile]
+
+        # Build codec arguments
+        codec_args = ['-c:v', profile['codec']]
+
+        if profile.get('preset'):
+            codec_args.extend(['-preset', profile['preset']])
+
+        if profile.get('profile'):
+            codec_args.extend(['-profile:v', profile['profile']])
+
+        if profile.get('extra_args'):
+            codec_args.extend(profile['extra_args'])
+
+        # Build hardware acceleration arguments WITHOUT hwaccel_output_format for 10-bit HEVC
+        hw_accel_args = []
+        if self.hw_acceleration:
+            hw_accel_args.extend(['-hwaccel', self.hw_acceleration])
+            # DO NOT add hwaccel_output_format for 10-bit HEVC sources
+            # This allows the data to be processed on CPU after hardware decode
+
+        return {
+            'hw_accel_args': hw_accel_args,
+            'codec_args': codec_args,
+            'needs_format_conversion': True,  # Always need format conversion for 10-bit HEVC
+            'hw_acceleration': self.hw_acceleration
+        }
