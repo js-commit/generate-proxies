@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import shutil
+import threading
 
 # Fix for Windows Unicode encoding issues
 if platform.system() == "Windows":
@@ -51,6 +52,7 @@ class ProxyGenerator:
             'transcoded': 0,
             'skipped': 0,
             'moved': 0,
+            'sony_proxies_moved': 0,
             'start_time': time.time()
         }
         self.processed_files_details = []
@@ -72,6 +74,10 @@ class ProxyGenerator:
             'max_workers_requested': max_workers,
             'shutdown': shutdown
         }
+        
+        # Thread-safe Sony proxy processing
+        self.sony_proxy_lock = threading.Lock()
+        self.processed_sony_proxies = set()  # Track already processed Sony proxies
         
         # Collect system information immediately
         self.system_info = self.collect_system_info()
@@ -235,6 +241,67 @@ class ProxyGenerator:
         except Exception:
             # If we can't read the directory for any reason, return False
             return False
+
+    def _detect_sony_proxy_pair(self, video_path):
+        """Detect if this video file has a corresponding Sony camera proxy in the same directory.
+        
+        Sony cameras create proxy files with the pattern:
+        - Original: 20250630_ze12041.MP4
+        - Proxy: 20250630_ze12041S03.MP4
+        
+        Returns:
+            tuple: (is_original, proxy_path_if_found, original_path_if_found)
+            - is_original: True if this file is the original, False if it's the proxy
+            - proxy_path_if_found: Path to proxy file if found, None otherwise
+            - original_path_if_found: Path to original file if found, None otherwise
+        """
+        video_path = Path(video_path)
+        parent_dir = video_path.parent
+        base_name = video_path.stem
+        extension = video_path.suffix
+        
+        # Check if current file appears to be a Sony proxy (has suffix pattern like S03, S02, etc.)
+        # Use regex to check for suffix pattern: ends with S followed by digits
+        import re
+        proxy_pattern = re.compile(r'S\d+$')
+        
+        if proxy_pattern.search(base_name):
+            # This appears to be a proxy file
+            # Extract the original base name by removing the S## suffix
+            original_base_name = re.sub(r'S\d+$', '', base_name)
+            original_path = parent_dir / f"{original_base_name}{extension}"
+            
+            if original_path.exists() and original_path != video_path:
+                # Found the corresponding original file
+                return False, video_path, original_path
+            else:
+                # No corresponding original found, treat as regular file
+                return True, None, None
+        else:
+            # This appears to be an original file
+            # Look for potential proxy files with S## suffix
+            proxy_candidates = []
+            
+            # Look for files that start with the same base name and have S## suffix
+            for file in parent_dir.iterdir():
+                if (file.is_file() and 
+                    file.suffix.lower() == extension.lower() and
+                    file.stem.startswith(base_name) and
+                    proxy_pattern.search(file.stem) and
+                    file != video_path):
+                    proxy_candidates.append(file)
+            
+            # Return the first valid proxy found (there might be multiple S01, S02, S03 etc.)
+            for proxy_candidate in proxy_candidates:
+                # Additional validation: proxy should be smaller than original
+                try:
+                    if proxy_candidate.stat().st_size < video_path.stat().st_size:
+                        return True, proxy_candidate, video_path
+                except OSError:
+                    continue
+            
+            # No proxy found
+            return True, None, None
 
     def _is_proxy_valid(self, proxy_path):
         """Check if existing proxy is valid"""
@@ -419,6 +486,14 @@ class ProxyGenerator:
         video_path = Path(video_path)
         self._log(f"Processing file: {video_path}")
 
+        # Check if file still exists (may have been moved by another thread in parallel processing)
+        if not video_path.exists():
+            self._log(f"File no longer exists (likely moved by another thread): {video_path.name}")
+            return
+
+        # Check for Sony camera proxy pairs first
+        is_original, sony_proxy_path, sony_original_path = self._detect_sony_proxy_pair(video_path)
+        
         # Create a details dictionary for this file
         file_details = {
             "filename": str(video_path),
@@ -426,8 +501,94 @@ class ProxyGenerator:
             "processing_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "result": "pending",
             "codec_decision": {},
-            "processing_time_seconds": 0
+            "processing_time_seconds": 0,
+            "sony_proxy_detected": sony_proxy_path is not None
         }
+
+        # Handle Sony proxy optimization
+        if sony_proxy_path and is_original:
+            # This is an original file with a Sony proxy - use the existing proxy
+            self._log(f"📷 SONY PROXY DETECTED: {video_path.name}")
+            self._log(f"   Original: {sony_original_path.name} ({self._get_file_size(sony_original_path):.1f}MB)")
+            self._log(f"   Sony proxy: {sony_proxy_path.name} ({self._get_file_size(sony_proxy_path):.1f}MB)")
+            
+            # Thread-safe Sony proxy processing
+            with self.sony_proxy_lock:
+                sony_proxy_str = str(sony_proxy_path)
+                
+                # Check if this Sony proxy was already processed by another thread
+                if sony_proxy_str in self.processed_sony_proxies:
+                    self._log(f"Sony proxy already processed by another thread: {sony_proxy_path.name}")
+                    self.stats['skipped'] += 1
+                    file_details["result"] = "skipped"
+                    file_details["skip_reason"] = "Sony proxy already processed by another thread"
+                    file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.processed_files_details.append(file_details)
+                    return
+                
+                # Mark this Sony proxy as being processed
+                self.processed_sony_proxies.add(sony_proxy_str)
+            
+            # Get the parent proxies directory
+            proxies_dir = self._get_proxies_dir(video_path)
+            
+            # Generate the target proxy name (Premiere Pro compatible)
+            proxy_name = f"{video_path.stem}_proxy{video_path.suffix}"
+            target_proxy_path = proxies_dir / proxy_name
+            
+            try:
+                # Check if target already exists
+                if target_proxy_path.exists():
+                    self._log(f"Target proxy already exists: {target_proxy_path}")
+                    self.stats['skipped'] += 1
+                    file_details["result"] = "skipped"
+                    file_details["skip_reason"] = "Sony proxy already moved to target location"
+                elif not sony_proxy_path.exists():
+                    # Sony proxy was already moved by another thread
+                    self._log(f"Sony proxy already moved by another thread: {sony_proxy_path.name}")
+                    self.stats['skipped'] += 1
+                    file_details["result"] = "skipped"
+                    file_details["skip_reason"] = "Sony proxy already moved by another thread"
+                else:
+                    # Safer copy-then-delete approach for Sony proxies
+                    shutil.copy2(sony_proxy_path, target_proxy_path)  # Copy with metadata
+                    
+                    # Verify the copy was successful before deleting
+                    if target_proxy_path.exists() and target_proxy_path.stat().st_size > 0:
+                        sony_proxy_path.unlink()  # Delete the original
+                        self._log(f"✅ SONY PROXY MOVED: {sony_proxy_path.name} → {target_proxy_path.name}")
+                        self._log(f"   Location: {proxies_dir}")
+                        
+                        self.stats['moved'] += 1
+                        self.stats['sony_proxies_moved'] += 1
+                        file_details["result"] = "sony_proxy_moved"
+                        file_details["sony_proxy_source"] = str(sony_proxy_path)
+                        file_details["sony_proxy_target"] = str(target_proxy_path)
+                        file_details["sony_proxy_size_mb"] = self._get_file_size(target_proxy_path)
+                    else:
+                        # Copy failed, clean up and log error
+                        if target_proxy_path.exists():
+                            target_proxy_path.unlink()  # Remove incomplete copy
+                        raise Exception(f"Copy verification failed - target file is missing or empty")
+                    
+            except Exception as e:
+                self._log(f"❌ Error moving Sony proxy: {str(e)}")
+                file_details["result"] = "error"
+                file_details["error"] = f"Error moving Sony proxy: {str(e)}"
+            
+            file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.processed_files_details.append(file_details)
+            return
+            
+        elif not is_original:
+            # This is a Sony proxy file itself - skip it since we'll handle it via the original
+            self._log(f"📷 SKIPPING SONY PROXY FILE: {video_path.name} (will be handled via original)")
+            self.stats['skipped'] += 1
+            file_details["result"] = "skipped"
+            file_details["skip_reason"] = "Sony proxy file - handled via original file"
+            file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.processed_files_details.append(file_details)
+            return
 
         # Get the parent proxies directory
         proxies_dir = self._get_proxies_dir(video_path)
@@ -843,7 +1004,10 @@ class ProxyGenerator:
             f.write(f"Total Files Found: {self.stats['total_files']}\n")
             f.write(f"Files Transcoded: {self.stats['transcoded']}\n")
             f.write(f"Files Skipped: {self.stats['skipped']}\n")
-            f.write(f"Proxies Moved: {self.stats['moved']}\n\n")
+            f.write(f"Proxies Moved: {self.stats['moved']}\n")
+            if self.stats['sony_proxies_moved'] > 0:
+                f.write(f"Sony Camera Proxies Moved: {self.stats['sony_proxies_moved']}\n")
+            f.write("\n")
             
             # File Details Section
             f.write("\n" + "=" * 80 + "\n")
@@ -939,7 +1103,8 @@ class ProxyGenerator:
                 "total_files": self.stats['total_files'],
                 "transcoded": self.stats['transcoded'],
                 "skipped": self.stats['skipped'],
-                "moved": self.stats['moved']
+                "moved": self.stats['moved'],
+                "sony_proxies_moved": self.stats['sony_proxies_moved']
             },
             "timestamp": self.timestamp
         }
@@ -957,13 +1122,15 @@ class ProxyGenerator:
         """Print final statistics and generate detailed report"""
         total_time = time.time() - self.stats['start_time']
         human_time = format_time_human(total_time)
+        sony_summary = f"\nSony proxies moved: {self.stats['sony_proxies_moved']}\n" if self.stats['sony_proxies_moved'] > 0 else ""
+        
         self._log(
             f"\nFinal Report:\n"
             f"Total time: {total_time:.2f} seconds ({human_time})\n"
             f"Total files found: {self.stats['total_files']}\n"
             f"Files transcoded: {self.stats['transcoded']}\n"
             f"Files skipped: {self.stats['skipped']}\n"
-            f"Proxies moved: {self.stats['moved']}\n"
+            f"Proxies moved: {self.stats['moved']}{sony_summary}"
         )
         
         # Generate detailed report
