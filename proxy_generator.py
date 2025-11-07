@@ -31,13 +31,14 @@ def format_time_human(seconds):
     return f"{minutes}:{seconds_remainder:02d}"
 
 class ProxyGenerator:
-    def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False, json_output=False):
+    def __init__(self, source_path, scale="quarter", codec="prores", parallel=True, max_workers=None, shutdown=False, json_output=False, skip_existing=False):
         self.source_path = Path(source_path)
         self.scale = scale
         self.parallel = parallel
         self.max_workers = max_workers
         self.shutdown = shutdown
         self.json_output = json_output
+        self.skip_existing = skip_existing
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Create proxy_logs directory for logs and reports
@@ -303,6 +304,51 @@ class ProxyGenerator:
             # No proxy found
             return True, None, None
 
+    def _find_sony_proxy_in_proxies_folder(self, video_path, proxies_dir):
+        """Check if a Sony proxy file for this video already exists in the proxies folder.
+
+        This handles the case where a Sony proxy was manually copied to the proxies folder
+        before running the script. The Sony proxy will have the S## suffix pattern.
+
+        Args:
+            video_path: Path to the original video file
+            proxies_dir: Path to the proxies directory
+
+        Returns:
+            Path to Sony proxy file if found, None otherwise
+        """
+        if not proxies_dir.exists():
+            return None
+
+        video_path = Path(video_path)
+        base_name = video_path.stem
+        extension = video_path.suffix
+
+        # Look for Sony proxy pattern: {base_name}S##.{extension}
+        import re
+        proxy_pattern = re.compile(r'S\d+$')
+
+        sony_proxy_candidates = []
+
+        for file in proxies_dir.iterdir():
+            if (file.is_file() and
+                file.suffix.lower() == extension.lower() and
+                file.stem.startswith(base_name) and
+                proxy_pattern.search(file.stem) and
+                file != video_path):
+                sony_proxy_candidates.append(file)
+
+        # Validate and return the first valid Sony proxy
+        for candidate in sony_proxy_candidates:
+            try:
+                # Verify it's smaller than the original (should be a proxy)
+                if candidate.stat().st_size < video_path.stat().st_size:
+                    return candidate
+            except OSError:
+                continue
+
+        return None
+
     def _is_proxy_valid(self, proxy_path):
         """Check if existing proxy is valid"""
         self._log(f"Validating proxy file: {proxy_path}")
@@ -371,10 +417,14 @@ class ProxyGenerator:
 
     def _prompt_user_for_duplicate_proxy(self, video_path, existing_proxy_path, new_proxy_path):
         """Prompt user when a proxy with different extension exists"""
+        # Auto-skip if flag is enabled
+        if self.skip_existing:
+            return 'skip'
+
         # Check if we have a pre-made decision (for parallel mode)
         if str(video_path) in self.conflict_decisions:
             return self.conflict_decisions[str(video_path)]
-            
+
         # Check if user has already made a global choice
         if self.user_choice_for_duplicates == 'yes_to_all':
             return 'yes'
@@ -454,7 +504,14 @@ class ProxyGenerator:
         """Resolve all conflicts with user input before processing starts"""
         if not conflicts:
             return
-            
+
+        # Auto-skip all conflicts if flag is enabled
+        if self.skip_existing:
+            for conflict in conflicts:
+                self.conflict_decisions[str(conflict['video_path'])] = 'skip'
+            print(f"\n⏭️  Auto-skipping {len(conflicts)} videos with existing proxies (--skip-existing enabled)")
+            return
+
         print(f"\n🎯 Found {len(conflicts)} proxy conflicts that need your decision:")
         print("=" * 60)
         
@@ -634,6 +691,41 @@ class ProxyGenerator:
         proxy_name = f"{video_path.stem}_proxy{output_extension}"
         proxy_path = proxies_dir / proxy_name
 
+        # Check if a Sony proxy was manually copied to the proxies folder
+        sony_proxy_in_proxies = self._find_sony_proxy_in_proxies_folder(video_path, proxies_dir)
+        if sony_proxy_in_proxies:
+            # Check if target path already exists
+            if proxy_path.exists():
+                self._log(f"📷 SONY PROXY FOUND: {sony_proxy_in_proxies.name}")
+                self._log(f"   Target already exists: {proxy_path.name}")
+                self._log(f"   Skipping rename, will use existing proxy")
+                # Let the normal flow handle the existing proxy
+            else:
+                try:
+                    self._log(f"📷 SONY PROXY FOUND IN PROXIES FOLDER: {sony_proxy_in_proxies.name}")
+                    self._log(f"   Renaming to standard format: {proxy_path.name}")
+
+                    # Rename the Sony proxy to the standard naming convention
+                    sony_proxy_in_proxies.rename(proxy_path)
+
+                    self._log(f"✅ SONY PROXY RENAMED: {sony_proxy_in_proxies.name} → {proxy_path.name}")
+                    self._log(f"   Location: {proxies_dir}")
+
+                    self.stats['moved'] += 1
+                    self.stats['sony_proxies_moved'] += 1
+                    file_details["result"] = "sony_proxy_renamed"
+                    file_details["sony_proxy_source"] = str(sony_proxy_in_proxies)
+                    file_details["sony_proxy_target"] = str(proxy_path)
+                    file_details["sony_proxy_size_mb"] = self._get_file_size(proxy_path)
+                    file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.processed_files_details.append(file_details)
+                    return
+
+                except Exception as e:
+                    self._log(f"❌ Error renaming Sony proxy: {str(e)}")
+                    self._log(f"   Will proceed with normal flow")
+                    # Continue with normal flow if rename fails
+
         # First, check if the proxy already exists in the parent proxies directory
         if proxy_path.exists() and self._is_proxy_valid(proxy_path):
             self.stats['skipped'] += 1
@@ -647,12 +739,13 @@ class ProxyGenerator:
         existing_different_proxy = self._find_existing_proxy_with_different_extension(video_path, proxy_path)
         if existing_different_proxy:
             user_choice = self._prompt_user_for_duplicate_proxy(video_path, existing_different_proxy, proxy_path)
-            
+
             if user_choice == 'skip':
                 self.stats['skipped'] += 1
-                self._log(f"Skipped {video_path.name} - user chose to skip due to existing proxy with different extension")
+                skip_reason = "Auto-skipped - existing proxy" if self.skip_existing else "User chose to skip due to existing proxy with different extension"
+                self._log(f"Skipped {video_path.name} - {skip_reason}")
                 file_details["result"] = "skipped"
-                file_details["skip_reason"] = f"User chose to skip - existing proxy: {existing_different_proxy.name}"
+                file_details["skip_reason"] = f"{skip_reason}: {existing_different_proxy.name}"
                 self.processed_files_details.append(file_details)
                 return
             else:
@@ -1303,6 +1396,8 @@ def main():
                         help='Shutdown the computer when processing is complete')
     parser.add_argument('--json-output', action='store_true',
                         help='Generate JSON output for benchmarking')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Automatically skip videos that already have proxies (different extensions), no prompts')
 
     args = parser.parse_args()
 
@@ -1334,7 +1429,8 @@ def main():
         parallel=not args.no_parallel,  # Invert the no_parallel flag
         max_workers=args.max_workers,
         shutdown=args.shutdown,
-        json_output=args.json_output
+        json_output=args.json_output,
+        skip_existing=args.skip_existing
     )
     generator.process()
 
@@ -1350,6 +1446,7 @@ def _display_current_settings(args):
     elif not args.no_parallel:
         default_workers = min(os.cpu_count() // 2 or 1, 8)
         print(f"Max Workers: {default_workers} (auto-detected)")
+    print(f"Skip Existing: {'Yes' if args.skip_existing else 'No'}")
     print(f"Auto-shutdown: {'Yes' if args.shutdown else 'No'}")
     print(f"JSON Output: {'Yes' if args.json_output else 'No'}")
     print()
