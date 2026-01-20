@@ -48,6 +48,8 @@ class ProxyGenerator:
         self.log_file = self.proxy_logs_dir / f"proxy-gen-logs-and-report-{self.timestamp}.txt"
         self.report_file = None
         self.video_extensions = {'.mp4', '.mov', '.mxf', '.avi', '.mkv'}
+
+        self.GENERAL_PROXIES_DIR = Path("/Volumes/samsungt5-512gb-ssd-apple/video-editing/proxies-general")
         self.stats = {
             'total_files': 0,
             'transcoded': 0,
@@ -349,6 +351,41 @@ class ProxyGenerator:
 
         return None
 
+    def _find_proxy_in_general_folder(self, video_path):
+        """Check centralized proxies folder for existing proxy.
+
+        Matches:
+        - Standard format: <basename>_proxy.<ext>
+        - Sony format: <basename>S##.<ext> (e.g., 20260115_ze12266S03.MP4)
+
+        Returns:
+            Path to proxy file if found and valid, None otherwise
+        """
+        if not self.GENERAL_PROXIES_DIR.exists():
+            return None
+
+        video_path = Path(video_path)
+        base_name = video_path.stem.lower()
+
+        for file in self.GENERAL_PROXIES_DIR.iterdir():
+            if not file.is_file():
+                continue
+
+            file_stem_lower = file.stem.lower()
+
+            # Check standard proxy naming: basename_proxy
+            if file_stem_lower == f"{base_name}_proxy":
+                if self._is_proxy_valid(file):
+                    return file
+
+            # Check Sony proxy naming: basenameS## (e.g., 20260115_ze12266S03)
+            sony_pattern = re.compile(rf'^{re.escape(base_name)}s\d+$', re.IGNORECASE)
+            if sony_pattern.match(file_stem_lower):
+                if self._is_proxy_valid(file):
+                    return file
+
+        return None
+
     def _is_proxy_valid(self, proxy_path):
         """Check if existing proxy is valid"""
         self._log(f"Validating proxy file: {proxy_path}")
@@ -488,7 +525,11 @@ class ProxyGenerator:
             # Skip if exact proxy already exists
             if proxy_path.exists() and self._is_proxy_valid(proxy_path):
                 continue
-                
+
+            # Skip if proxy exists in centralized general proxies folder
+            if self._find_proxy_in_general_folder(video_path):
+                continue
+
             # Check for existing proxy with different extension
             existing_different_proxy = self._find_existing_proxy_with_different_extension(video_path, proxy_path)
             if existing_different_proxy:
@@ -643,6 +684,46 @@ class ProxyGenerator:
             self.stats['skipped'] += 1
             file_details["result"] = "skipped"
             file_details["skip_reason"] = "Sony proxy file - handled via original file"
+            file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.processed_files_details.append(file_details)
+            return
+
+        # Check centralized general proxies folder first
+        general_proxy = self._find_proxy_in_general_folder(video_path)
+        if general_proxy:
+            proxies_dir = self._get_proxies_dir(video_path)
+
+            # Determine target filename - rename Sony format to standard _proxy format
+            if re.match(rf'^{re.escape(video_path.stem)}s\d+$', general_proxy.stem, re.IGNORECASE):
+                # Sony format proxy - rename to standard format
+                target_name = f"{video_path.stem}_proxy{general_proxy.suffix}"
+            else:
+                # Already standard format
+                target_name = general_proxy.name
+
+            target_path = proxies_dir / target_name
+
+            # Check if target already exists
+            if target_path.exists() and self._is_proxy_valid(target_path):
+                self._log(f"Proxy already exists at target: {target_path}")
+                self.stats['skipped'] += 1
+                file_details["result"] = "skipped"
+                file_details["skip_reason"] = "Proxy already exists at target location"
+            else:
+                try:
+                    self._log(f"📦 GENERAL FOLDER PROXY FOUND: {general_proxy.name}")
+                    self._log(f"   Moving: {general_proxy} -> {target_path}")
+                    shutil.move(str(general_proxy), str(target_path))
+                    self.stats['moved'] += 1
+                    file_details["result"] = "moved"
+                    file_details["moved_from"] = str(general_proxy)
+                    file_details["moved_to"] = str(target_path)
+                    self._log(f"✅ PROXY MOVED FROM GENERAL FOLDER: {target_path.name}")
+                except Exception as e:
+                    self._log(f"❌ Error moving proxy from general folder: {e}")
+                    file_details["result"] = "error"
+                    file_details["error"] = str(e)
+
             file_details["processing_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.processed_files_details.append(file_details)
             return
