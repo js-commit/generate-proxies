@@ -1477,8 +1477,8 @@ def main():
                         help='Shutdown the computer when processing is complete')
     parser.add_argument('--json-output', action='store_true',
                         help='Generate JSON output for benchmarking')
-    parser.add_argument('--skip-existing', action='store_true',
-                        help='Automatically skip videos that already have proxies (different extensions), no prompts')
+    parser.add_argument('--prompt-existing', action='store_true',
+                        help='Prompt for each video that already has a proxy with different extension (default: auto-skip)')
 
     args = parser.parse_args()
 
@@ -1511,7 +1511,7 @@ def main():
         max_workers=args.max_workers,
         shutdown=args.shutdown,
         json_output=args.json_output,
-        skip_existing=args.skip_existing
+        skip_existing=not args.prompt_existing
     )
     generator.process()
 
@@ -1527,7 +1527,7 @@ def _display_current_settings(args):
     elif not args.no_parallel:
         default_workers = min(os.cpu_count() // 2 or 1, 8)
         print(f"Max Workers: {default_workers} (auto-detected)")
-    print(f"Skip Existing: {'Yes' if args.skip_existing else 'No'}")
+    print(f"Prompt for Existing: {'Yes' if args.prompt_existing else 'No (auto-skip)'}")
     print(f"Auto-shutdown: {'Yes' if args.shutdown else 'No'}")
     print(f"JSON Output: {'Yes' if args.json_output else 'No'}")
     print()
