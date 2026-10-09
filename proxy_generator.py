@@ -15,13 +15,9 @@ import shutil
 import threading
 
 def _video_root() -> Path:
-    """Video-editing root: $VIDEO_DIR if set (both Macs export it), else
-    ~/video-editing (M5 MacBook Pro, the primary editing machine), else the
-    T5 SSD still used on the M4 Mac Mini."""
-    if "VIDEO_DIR" in os.environ:
-        return Path(os.environ["VIDEO_DIR"])
-    local = Path.home() / "video-editing"
-    return local if local.is_dir() else Path("/Volumes/samsungt5-512gb-ssd-apple/video-editing")
+    """Video-editing root: $VIDEO_DIR (mac-config's zshenv: the external drive's
+    video-editing/, else ~/video-editing), else ~/video-editing."""
+    return Path(os.environ.get("VIDEO_DIR") or Path.home() / "video-editing")
 
 
 # Fix for Windows Unicode encoding issues
