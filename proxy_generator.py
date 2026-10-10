@@ -16,8 +16,8 @@ import threading
 
 def _video_root() -> Path:
     """Video-editing root: $VIDEO_DIR (mac-config's zshenv: the external drive's
-    video-editing/, else ~/video-editing), else ~/video-editing."""
-    return Path(os.environ.get("VIDEO_DIR") or Path.home() / "video-editing")
+    video-editing/, else ~/video-editing); stops if it's unset."""
+    return Path(os.environ.get("VIDEO_DIR") or sys.exit("VIDEO_DIR is not set: run this from zsh (mac-config's zshenv exports it)"))
 
 
 # Fix for Windows Unicode encoding issues
